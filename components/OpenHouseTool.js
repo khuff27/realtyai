@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { canUse } from '../lib/usage'
+import { authFetch } from '../lib/api'
 import toast from 'react-hot-toast'
 
 const emptyLead = () => ({ name: '', contact: '' })
@@ -30,7 +31,7 @@ export default function OpenHouseTool({ profile, onUsageUpdate, onUpgrade }) {
     setLoading(true)
     setResults(null)
     try {
-      const res = await fetch('/api/generate/openhouse', {
+      const res = await authFetch('/api/generate/openhouse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ property, highlights, leads: validLeads, type }),

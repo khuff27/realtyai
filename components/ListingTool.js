@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { canUse } from '../lib/usage'
+import { authFetch } from '../lib/api'
 import toast from 'react-hot-toast'
 
 export default function ListingTool({ profile, onUsageUpdate, onUpgrade }) {
@@ -21,7 +22,7 @@ export default function ListingTool({ profile, onUsageUpdate, onUpgrade }) {
     setLoading(true)
     setOutputs(null)
     try {
-      const res = await fetch('/api/generate/listing', {
+      const res = await authFetch('/api/generate/listing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),

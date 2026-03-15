@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { canUse } from '../lib/usage'
+import { authFetch } from '../lib/api'
 import toast from 'react-hot-toast'
 
 const emptyComp = () => ({ address: '', price: '', beds: '', sqft: '' })
@@ -24,7 +25,7 @@ export default function CMATool({ profile, onUsageUpdate, onUpgrade }) {
     setLoading(true)
     setReport(null)
     try {
-      const res = await fetch('/api/generate/cma', {
+      const res = await authFetch('/api/generate/cma', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subject, comps: comps.filter(c => c.address) }),

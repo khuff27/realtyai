@@ -1,29 +1,27 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { createServerClient } from '@supabase/ssr'
 import { getServiceClient } from '../../../lib/supabase'
 import { canUse, FREE_LIMITS } from '../../../lib/usage'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
+async function getUserFromToken(req) {
+  const auth = req.headers.authorization
+  if (!auth || !auth.startsWith('Bearer ')) return null
+  const token = auth.replace('Bearer ', '')
+  const admin = getServiceClient()
+  const { data: { user }, error } = await admin.auth.getUser(token)
+  if (error || !user) return null
+  return user
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    {
-      cookies: {
-        get: (name) => req.cookies[name],
-        set: () => {},
-        remove: () => {},
-      },
-    }
-  )
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) return res.status(401).json({ error: 'Not authenticated' })
+  const user = await getUserFromToken(req)
+  if (!user) return res.status(401).json({ error: 'Not authenticated' })
 
   const admin = getServiceClient()
-  const { data: profile } = await admin.from('profiles').select('*').eq('id', session.user.id).single()
+  const { data: profile } = await admin.from('profiles').select('*').eq('id', user.id).single()
 
   if (!canUse(profile, 'openhouse')) {
     return res.status(403).json({ error: 'Monthly follow-up limit reached. Upgrade to Pro for unlimited follow-ups.' })
@@ -34,7 +32,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Property address and at least one guest are required.' })
   }
 
-  // Check if adding these leads would exceed free limit
   if (!profile.is_pro) {
     const used = profile.usage_openhouse || 0
     const remaining = FREE_LIMITS.openhouse - used
@@ -52,10 +49,10 @@ export default async function handler(req, res) {
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1400,
-      system: 'You are RealtyAI, a real estate assistant helping agents follow up with open house guests. Write warm, personal messages that feel human — not templated. Plain text only.',
+      system: 'You are RealtyAI, helping agents follow up with open house guests. Write warm, personal messages. Plain text only.',
       messages: [{
         role: 'user',
-        content: `Write personalized open house follow-up ${isText ? 'text messages' : 'emails'} for each guest below.
+        content: `Write personalized open house follow-up ${isText ? 'text messages' : 'emails'} for each guest.
 
 PROPERTY: ${property}
 HIGHLIGHTS: ${highlights || 'Not specified'}
@@ -64,16 +61,10 @@ GUESTS:
 ${leadList}
 
 Instructions:
-- Write one ${isText ? 'text message' : 'email'} per guest
-- ${isText ? 'Keep texts under 160 characters if possible. Warm and conversational.' : 'Include a Subject line on the first line (format: "Subject: ..."), then a 3-4 sentence email body.'}
-- Use each guest's name
-- Reference the property naturally
-- Invite them to ask questions or schedule a showing
-- End with "[Agent Name]" as placeholder for the agent's signature
-- NO pressure tactics, NO exclamation point overuse
-- Separate each follow-up with exactly "---GUEST---" on its own line
-
-Write all ${leads.length} follow-up${leads.length !== 1 ? 's' : ''} now:`,
+- ${isText ? 'Keep texts under 160 characters. Warm and conversational.' : 'Include Subject: line first, then 3-4 sentence email.'}
+- Use each guest name, reference the property, invite questions or a showing
+- End with "[Agent Name]"
+- Separate each with exactly "---GUEST---" on its own line`,
       }],
     })
 
@@ -85,10 +76,9 @@ Write all ${leads.length} follow-up${leads.length !== 1 ? 's' : ''} now:`,
       message: parts[i] || `Hi ${lead.name}, thanks for visiting ${property} today! Feel free to reach out with any questions. — [Agent Name]`,
     }))
 
-    // Increment usage by number of leads processed
     await admin.from('profiles')
       .update({ usage_openhouse: (profile.usage_openhouse || 0) + leads.length })
-      .eq('id', session.user.id)
+      .eq('id', user.id)
 
     return res.status(200).json({ followups })
   } catch (err) {

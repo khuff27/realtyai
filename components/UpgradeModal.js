@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import toast from 'react-hot-toast'
+import { authFetch } from '../lib/api'
 
 export default function UpgradeModal({ profile, onClose, onSuccess }) {
   const [loading, setLoading] = useState(false)
@@ -7,7 +8,7 @@ export default function UpgradeModal({ profile, onClose, onSuccess }) {
   async function startCheckout() {
     setLoading(true)
     try {
-      const res = await fetch('/api/billing/checkout', { method: 'POST' })
+      const res = await authFetch('/api/billing/checkout', { method: 'POST' })
       const { url, error } = await res.json()
       if (error) throw new Error(error)
       window.location.href = url
