@@ -1,7 +1,7 @@
 import Head from 'next/head'
 import Link from 'next/link'
 import { useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { getSupabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 
 export default function Signup() {
@@ -15,7 +15,7 @@ export default function Signup() {
     e.preventDefault()
     if (!email) return
     setLoading(true)
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await getSupabase().auth.signInWithOtp({
       email,
       options: {
         emailRedirectTo: `${window.location.origin}/app`,
@@ -32,7 +32,7 @@ export default function Signup() {
 
   async function handleGoogle() {
     setGoogleLoading(true)
-    const { error } = await supabase.auth.signInWithOAuth({
+    const { error } = await getSupabase().auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: `${window.location.origin}/app` },
     })

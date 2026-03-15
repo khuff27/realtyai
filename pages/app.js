@@ -1,13 +1,12 @@
 import Head from 'next/head'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
-import { supabase } from '../lib/supabase'
+import { getSupabase } from '../lib/supabase'
 import ListingTool from '../components/ListingTool'
 import CMATool from '../components/CMATool'
 import OpenHouseTool from '../components/OpenHouseTool'
 import UpgradeModal from '../components/UpgradeModal'
-import { canUse, usageLeft, FREE_LIMITS } from '../lib/usage'
-import toast from 'react-hot-toast'
+import { canUse, usageLeft } from '../lib/usage'
 
 const NAV = [
   { id: 'listing',   icon: '✎', label: 'Listing Generator' },
@@ -22,44 +21,64 @@ export default function App() {
   const [activeTool, setActiveTool] = useState('listing')
   const [showUpgrade, setShowUpgrade] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) { router.push('/login'); return }
-      if (session.access_token) {
-        localStorage.setItem('realtyai_token', session.access_token)
-      }
-      setUser(session.user)
-      fetchProfile(session.user.id)
-    })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
+    const sb = getSupabase()
+
+    sb.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
         localStorage.removeItem('realtyai_token')
+        setUser(null)
+        setProfile(null)
         router.push('/login')
-      } else if (session?.access_token) {
+        return
+      }
+      if (session?.access_token) {
         localStorage.setItem('realtyai_token', session.access_token)
+        setUser(session.user)
+        fetchProfile(session.user.id, sb)
       }
     })
-    return () => listener.subscription.unsubscribe()
+
+    // Check for existing session
+    sb.auth.getSession().then(({ data }) => {
+      const session = data?.session
+      if (!session) {
+        setLoading(false)
+        router.push('/login')
+        return
+      }
+      localStorage.setItem('realtyai_token', session.access_token)
+      setUser(session.user)
+      fetchProfile(session.user.id, sb)
+    }).catch(() => {
+      setLoading(false)
+      router.push('/login')
+    })
   }, [])
 
-  async function fetchProfile(userId) {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single()
-    if (data) setProfile(data)
+  async function fetchProfile(userId, sb) {
+    try {
+      const { data } = await sb
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single()
+      setProfile(data)
+    } catch(e) {}
     setLoading(false)
   }
 
   async function refreshProfile() {
-    if (user) await fetchProfile(user.id)
+    if (!user) return
+    const sb = getSupabase()
+    await fetchProfile(user.id, sb)
   }
 
   async function signOut() {
-    await supabase.auth.signOut()
+    const sb = getSupabase()
+    await sb.auth.signOut()
+    localStorage.removeItem('realtyai_token')
     router.push('/')
   }
 
@@ -83,7 +102,6 @@ export default function App() {
           display: 'flex', flexDirection: 'column',
           position: 'sticky', top: 0, height: '100vh',
         }}>
-          {/* Logo */}
           <div style={{ padding: '24px 24px 20px', borderBottom: '1px solid #2E2E2B' }}>
             <div style={{ fontFamily: '"DM Serif Display", serif', fontSize: 22, color: '#F0EDE6' }}>RealtyAI</div>
             {profile?.is_pro ? (
@@ -103,7 +121,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Nav */}
           <nav style={{ flex: 1, padding: '16px 12px' }}>
             {NAV.map(item => {
               const active = activeTool === item.id
@@ -139,7 +156,6 @@ export default function App() {
             })}
           </nav>
 
-          {/* Usage summary & upgrade */}
           {!profile?.is_pro && (
             <div style={{ padding: '0 12px 12px' }}>
               <button onClick={() => setShowUpgrade(true)} style={{
@@ -154,7 +170,6 @@ export default function App() {
             </div>
           )}
 
-          {/* User */}
           <div style={{ padding: '12px 16px', borderTop: '1px solid #2E2E2B', display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
               width: 34, height: 34, borderRadius: '50%',
@@ -179,7 +194,6 @@ export default function App() {
           </div>
         </aside>
 
-        {/* MAIN CONTENT */}
         <main style={{ flex: 1, overflowY: 'auto', padding: '40px', maxWidth: 800 }}>
           {activeTool === 'listing'   && <ListingTool   {...toolProps} />}
           {activeTool === 'cma'       && <CMATool        {...toolProps} />}
