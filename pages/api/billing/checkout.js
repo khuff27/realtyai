@@ -1,5 +1,5 @@
 import Stripe from 'stripe'
-import { createServerSupabaseClient } from '@supabase/auth-helpers-nextjs'
+import { createServerClient } from '@supabase/ssr'
 import { getServiceClient } from '../../../lib/supabase'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
@@ -7,7 +7,17 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const supabase = createServerSupabaseClient({ req, res })
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    {
+      cookies: {
+        get: (name) => req.cookies[name],
+        set: () => {},
+        remove: () => {},
+      },
+    }
+  )
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) return res.status(401).json({ error: 'Not authenticated' })
 
