@@ -6,11 +6,14 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 async function getUserFromToken(req) {
   const auth = req.headers.authorization
+  console.log('Auth header:', auth ? 'present' : 'missing')
   if (!auth || !auth.startsWith('Bearer ')) return null
   const token = auth.replace('Bearer ', '')
+  console.log('Token length:', token.length)
   const admin = getServiceClient()
   const { data: { user }, error } = await admin.auth.getUser(token)
-  if (error || !user) return null
+  if (error) console.log('Auth error:', error.message)
+  if (!user) return null
   return user
 }
 
@@ -22,7 +25,19 @@ export default async function handler(req, res) {
 
   const admin = getServiceClient()
   const { data: profile } = await admin.from('profiles').select('*').eq('id', user.id).single()
-  if (!canUse(profile, 'cma')) {
+
+  // Auto-create profile if missing (Google OAuth users may not have one)
+  let activeProfile = profile
+  if (!activeProfile) {
+    const { data: newProfile } = await admin.from('profiles').insert({
+      id: user.id,
+      email: user.email,
+      full_name: user.user_metadata?.full_name || user.email,
+    }).select().single()
+    activeProfile = newProfile
+  }
+
+  if (!canUse(activeProfile, 'cma')) {
     return res.status(403).json({ error: 'Monthly CMA limit reached. Upgrade to Pro for unlimited reports.' })
   }
 
@@ -64,7 +79,7 @@ AGENT TALKING POINTS`,
     const report = message.content[0].text.trim()
 
     await admin.from('profiles')
-      .update({ usage_cma: (profile.usage_cma || 0) + 1 })
+      .update({ usage_cma: (activeProfile.usage_cma || 0) + 1 })
       .eq('id', user.id)
 
     return res.status(200).json({ report })

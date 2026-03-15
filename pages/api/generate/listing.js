@@ -14,6 +14,17 @@ async function getUserFromToken(req) {
   return user
 }
 
+async function getOrCreateProfile(admin, user) {
+  const { data: profile } = await admin.from('profiles').select('*').eq('id', user.id).single()
+  if (profile) return profile
+  const { data: newProfile } = await admin.from('profiles').insert({
+    id: user.id,
+    email: user.email,
+    full_name: user.user_metadata?.full_name || user.email,
+  }).select().single()
+  return newProfile
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
@@ -21,7 +32,8 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: 'Not authenticated' })
 
   const admin = getServiceClient()
-  const { data: profile } = await admin.from('profiles').select('*').eq('id', user.id).single()
+  const profile = await getOrCreateProfile(admin, user)
+
   if (!canUse(profile, 'listing')) {
     return res.status(403).json({ error: 'Monthly listing limit reached. Upgrade to Pro for unlimited access.' })
   }
