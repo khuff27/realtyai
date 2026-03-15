@@ -1,12 +1,15 @@
 import Head from 'next/head'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
-import { getSupabase } from '../lib/supabase'
+import { getUser, getSession, signOut as authSignOut } from '../lib/auth'
 import ListingTool from '../components/ListingTool'
 import CMATool from '../components/CMATool'
 import OpenHouseTool from '../components/OpenHouseTool'
 import UpgradeModal from '../components/UpgradeModal'
 import { canUse, usageLeft } from '../lib/usage'
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 const NAV = [
   { id: 'listing',   icon: '✎', label: 'Listing Generator' },
@@ -23,62 +26,68 @@ export default function App() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const sb = getSupabase()
-
-    sb.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || !session) {
-        localStorage.removeItem('realtyai_token')
-        setUser(null)
-        setProfile(null)
+    async function init() {
+      // Handle OAuth/magic link callback in URL hash
+      await getSession()
+      const u = await getUser()
+      if (!u) {
         router.push('/login')
         return
       }
-      if (session?.access_token) {
-        localStorage.setItem('realtyai_token', session.access_token)
-        setUser(session.user)
-        fetchProfile(session.user.id, sb)
-      }
-    })
-
-    // Check for existing session
-    sb.auth.getSession().then(({ data }) => {
-      const session = data?.session
-      if (!session) {
-        setLoading(false)
-        router.push('/login')
-        return
-      }
-      localStorage.setItem('realtyai_token', session.access_token)
-      setUser(session.user)
-      fetchProfile(session.user.id, sb)
-    }).catch(() => {
+      setUser(u)
+      await loadProfile(u.id)
       setLoading(false)
-      router.push('/login')
-    })
+    }
+    init()
   }, [])
 
-  async function fetchProfile(userId, sb) {
+  async function loadProfile(userId) {
     try {
-      const { data } = await sb
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single()
-      setProfile(data)
-    } catch(e) {}
-    setLoading(false)
+      const token = localStorage.getItem('realtyai_token')
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,
+        {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      )
+      const data = await res.json()
+      if (data && data[0]) {
+        setProfile(data[0])
+      } else {
+        // Auto-create profile for new users
+        await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation',
+          },
+          body: JSON.stringify({
+            id: userId,
+            email: user?.email,
+            full_name: user?.user_metadata?.full_name || '',
+          }),
+        })
+        const res2 = await fetch(
+          `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,
+          { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` } }
+        )
+        const data2 = await res2.json()
+        if (data2?.[0]) setProfile(data2[0])
+      }
+    } catch(e) { console.error('Profile error:', e) }
   }
 
   async function refreshProfile() {
-    if (!user) return
-    const sb = getSupabase()
-    await fetchProfile(user.id, sb)
+    if (user) await loadProfile(user.id)
   }
 
   async function signOut() {
-    const sb = getSupabase()
-    await sb.auth.signOut()
-    localStorage.removeItem('realtyai_token')
+    await authSignOut()
     router.push('/')
   }
 
@@ -94,8 +103,6 @@ export default function App() {
     <>
       <Head><title>RealtyAI — Dashboard</title></Head>
       <div style={{ display: 'flex', minHeight: '100vh', background: '#0F0F0E' }}>
-
-        {/* SIDEBAR */}
         <aside style={{
           width: 260, flexShrink: 0,
           background: '#1A1A18', borderRight: '1px solid #2E2E2B',
@@ -105,19 +112,9 @@ export default function App() {
           <div style={{ padding: '24px 24px 20px', borderBottom: '1px solid #2E2E2B' }}>
             <div style={{ fontFamily: '"DM Serif Display", serif', fontSize: 22, color: '#F0EDE6' }}>RealtyAI</div>
             {profile?.is_pro ? (
-              <span style={{
-                display: 'inline-block', marginTop: 6,
-                background: 'linear-gradient(135deg, #C9A84C, #E8C96A)',
-                color: '#1a1200', fontSize: 11, fontWeight: 700,
-                padding: '2px 10px', borderRadius: 20,
-              }}>PRO</span>
+              <span style={{ display: 'inline-block', marginTop: 6, background: 'linear-gradient(135deg, #C9A84C, #E8C96A)', color: '#1a1200', fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 20 }}>PRO</span>
             ) : (
-              <span style={{
-                display: 'inline-block', marginTop: 6,
-                background: '#242422', color: '#8A8880',
-                border: '1px solid #2E2E2B',
-                fontSize: 11, padding: '2px 10px', borderRadius: 20,
-              }}>Free plan</span>
+              <span style={{ display: 'inline-block', marginTop: 6, background: '#242422', color: '#8A8880', border: '1px solid #2E2E2B', fontSize: 11, padding: '2px 10px', borderRadius: 20 }}>Free plan</span>
             )}
           </div>
 
@@ -127,27 +124,21 @@ export default function App() {
               const left = usageLeft(profile, item.id)
               const limited = !profile?.is_pro && left === 0
               return (
-                <button key={item.id}
-                  onClick={() => setActiveTool(item.id)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-                    padding: '11px 14px', borderRadius: 10, border: 'none', cursor: 'pointer',
-                    background: active ? 'rgba(201,168,76,0.1)' : 'transparent',
-                    color: active ? '#C9A84C' : limited ? '#5A5855' : '#8A8880',
-                    fontSize: 14, fontFamily: '"DM Sans", sans-serif',
-                    marginBottom: 2, textAlign: 'left', transition: 'all 0.15s',
-                  }}
+                <button key={item.id} onClick={() => setActiveTool(item.id)} style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                  padding: '11px 14px', borderRadius: 10, border: 'none', cursor: 'pointer',
+                  background: active ? 'rgba(201,168,76,0.1)' : 'transparent',
+                  color: active ? '#C9A84C' : limited ? '#5A5855' : '#8A8880',
+                  fontSize: 14, fontFamily: '"DM Sans", sans-serif',
+                  marginBottom: 2, textAlign: 'left', transition: 'all 0.15s',
+                }}
                   onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#242422' }}
                   onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
                 >
                   <span style={{ fontSize: 16, width: 20, textAlign: 'center' }}>{item.icon}</span>
                   <span style={{ flex: 1 }}>{item.label}</span>
                   {!profile?.is_pro && (
-                    <span style={{
-                      fontSize: 11, color: limited ? '#5A5855' : '#8A8880',
-                      background: '#242422', border: '1px solid #2E2E2B',
-                      padding: '1px 7px', borderRadius: 10,
-                    }}>
+                    <span style={{ fontSize: 11, color: limited ? '#5A5855' : '#8A8880', background: '#242422', border: '1px solid #2E2E2B', padding: '1px 7px', borderRadius: 10 }}>
                       {limited ? '0 left' : `${left} left`}
                     </span>
                   )}
@@ -164,33 +155,19 @@ export default function App() {
                 border: 'none', borderRadius: 10, cursor: 'pointer',
                 color: '#1a1200', fontWeight: 600, fontSize: 14,
                 fontFamily: '"DM Sans", sans-serif',
-              }}>
-                ★ Upgrade to Pro — $29/mo
-              </button>
+              }}>★ Upgrade to Pro — $29/mo</button>
             </div>
           )}
 
           <div style={{ padding: '12px 16px', borderTop: '1px solid #2E2E2B', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              width: 34, height: 34, borderRadius: '50%',
-              background: 'rgba(201,168,76,0.15)', display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-              fontSize: 13, fontWeight: 600, color: '#C9A84C', flexShrink: 0,
-            }}>
+            <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(201,168,76,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, color: '#C9A84C', flexShrink: 0 }}>
               {(profile?.full_name || user?.email || '?')[0].toUpperCase()}
             </div>
             <div style={{ flex: 1, overflow: 'hidden' }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: '#F0EDE6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {profile?.full_name || 'Agent'}
-              </div>
-              <div style={{ fontSize: 11, color: '#5A5855', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {user?.email}
-              </div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: '#F0EDE6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{profile?.full_name || 'Agent'}</div>
+              <div style={{ fontSize: 11, color: '#5A5855', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.email}</div>
             </div>
-            <button onClick={signOut} title="Sign out" style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: '#5A5855', fontSize: 16, padding: '4px',
-            }}>⎋</button>
+            <button onClick={signOut} title="Sign out" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5A5855', fontSize: 16, padding: '4px' }}>⎋</button>
           </div>
         </aside>
 
@@ -200,7 +177,6 @@ export default function App() {
           {activeTool === 'openhouse' && <OpenHouseTool  {...toolProps} />}
         </main>
       </div>
-
       {showUpgrade && <UpgradeModal profile={profile} onClose={() => setShowUpgrade(false)} onSuccess={refreshProfile} />}
     </>
   )
