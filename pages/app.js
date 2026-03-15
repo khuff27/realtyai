@@ -27,11 +27,19 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { router.push('/login'); return }
+      if (session.access_token) {
+        localStorage.setItem('realtyai_token', session.access_token)
+      }
       setUser(session.user)
       fetchProfile(session.user.id)
     })
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) router.push('/login')
+      if (!session) {
+        localStorage.removeItem('realtyai_token')
+        router.push('/login')
+      } else if (session?.access_token) {
+        localStorage.setItem('realtyai_token', session.access_token)
+      }
     })
     return () => listener.subscription.unsubscribe()
   }, [])
