@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { loadStripe } from '@stripe/stripe-js'
 import toast from 'react-hot-toast'
 
 export default function UpgradeModal({ profile, onClose, onSuccess }) {
