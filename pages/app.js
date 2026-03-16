@@ -1,7 +1,6 @@
 import Head from 'next/head'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
-import { getUser, getSession, signOut as authSignOut } from '../lib/auth'
 import ListingTool from '../components/ListingTool'
 import CMATool from '../components/CMATool'
 import OpenHouseTool from '../components/OpenHouseTool'
@@ -17,6 +16,25 @@ const NAV = [
   { id: 'openhouse', icon: '⌂', label: 'Open House' },
 ]
 
+function getStoredToken() {
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        const val = JSON.parse(localStorage.getItem(key))
+        if (val?.access_token) return val.access_token
+      }
+    }
+  } catch(e) {}
+  return null
+}
+
+function decodeJWT(token) {
+  try {
+    const payload = token.split('.')[1]
+    return JSON.parse(atob(payload))
+  } catch(e) { return null }
+}
+
 export default function App() {
   const router = useRouter()
   const [user, setUser] = useState(null)
@@ -27,67 +45,94 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
-      // Handle OAuth/magic link callback in URL hash
-      await getSession()
-      const u = await getUser()
-      if (!u) {
+      let token = null
+
+      // Step 1: Check URL hash for token (OAuth/magic link callback)
+      if (window.location.hash && window.location.hash.includes('access_token')) {
+        const params = new URLSearchParams(window.location.hash.replace('#', ''))
+        const hashToken = params.get('access_token')
+        if (hashToken) {
+          token = hashToken
+          // Store it in the same format Supabase uses
+          const projectRef = SUPABASE_URL.split('//')[1].split('.')[0]
+          const expiresAt = parseInt(params.get('expires_at') || '0')
+          localStorage.setItem(`sb-${projectRef}-auth-token`, JSON.stringify({
+            access_token: token,
+            refresh_token: params.get('refresh_token') || '',
+            expires_at: expiresAt,
+            token_type: 'bearer',
+          }))
+          // Clean URL
+          window.history.replaceState(null, '', '/app')
+        }
+      }
+
+      // Step 2: Fall back to stored token
+      if (!token) {
+        token = getStoredToken()
+      }
+
+      if (!token) {
         router.push('/login')
         return
       }
-      setUser(u)
-      await loadProfile(u.id)
+
+      // Step 3: Decode user from token
+      const payload = decodeJWT(token)
+      if (!payload?.sub || (payload.exp && payload.exp < Date.now() / 1000)) {
+        router.push('/login')
+        return
+      }
+
+      const userData = {
+        id: payload.sub,
+        email: payload.email,
+        user_metadata: payload.user_metadata || {},
+      }
+      setUser(userData)
+
+      // Step 4: Load profile
+      await loadProfile(userData.id, token)
       setLoading(false)
     }
+
     init()
   }, [])
 
-  async function loadProfile(userId) {
+  async function loadProfile(userId, token) {
     try {
-      const token = localStorage.getItem('realtyai_token')
+      const storedToken = token || getStoredToken()
       const res = await fetch(
         `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,
         {
           headers: {
             'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${storedToken}`,
           },
         }
       )
       const data = await res.json()
-      if (data && data[0]) {
+      if (data?.[0]) {
         setProfile(data[0])
-      } else {
-        // Auto-create profile for new users
-        await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation',
-          },
-          body: JSON.stringify({
-            id: userId,
-            email: user?.email,
-            full_name: user?.user_metadata?.full_name || '',
-          }),
-        })
-        const res2 = await fetch(
-          `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`,
-          { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` } }
-        )
-        const data2 = await res2.json()
-        if (data2?.[0]) setProfile(data2[0])
       }
-    } catch(e) { console.error('Profile error:', e) }
+    } catch(e) {
+      console.error('Profile load error:', e)
+    }
   }
 
   async function refreshProfile() {
-    if (user) await loadProfile(user.id)
+    if (user) {
+      const token = getStoredToken()
+      await loadProfile(user.id, token)
+    }
   }
 
   async function signOut() {
-    await authSignOut()
+    try {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('sb-')) localStorage.removeItem(key)
+      }
+    } catch(e) {}
     router.push('/')
   }
 
