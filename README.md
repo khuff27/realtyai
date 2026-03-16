@@ -23,23 +23,23 @@ Freemium SaaS — free tier with monthly limits, Pro plan at $29/month.
 2. In the SQL Editor, paste and run the contents of `supabase-schema.sql`
 3. Go to Project Settings → API → copy:
 
-   * Project URL → `NEXT\_PUBLIC\_SUPABASE\_URL`
-   * anon/public key → `NEXT\_PUBLIC\_SUPABASE\_ANON\_KEY`
-   * service\_role key → `SUPABASE\_SERVICE\_ROLE\_KEY`
+   * Project URL → `NEXT\\\_PUBLIC\\\_SUPABASE\\\_URL`
+   * anon/public key → `NEXT\\\_PUBLIC\\\_SUPABASE\\\_ANON\\\_KEY`
+   * service\_role key → `SUPABASE\\\_SERVICE\\\_ROLE\\\_KEY`
 4. Go to Authentication → URL Configuration → add your Vercel domain to Site URL and Redirect URLs
 
 ### 2\. Set up Anthropic
 
 1. Go to [console.anthropic.com](https://console.anthropic.com)
-2. Create an API key → `ANTHROPIC\_API\_KEY`
+2. Create an API key → `ANTHROPIC\\\_API\\\_KEY`
 
 ### 3\. Set up Stripe
 
 1. Go to [dashboard.stripe.com](https://dashboard.stripe.com)
 2. Create a Product: "RealtyAI Pro" with a recurring price of $29/month
-3. Copy the Price ID → `STRIPE\_PRO\_PRICE\_ID`
-4. Copy publishable key → `NEXT\_PUBLIC\_STRIPE\_PUBLISHABLE\_KEY`
-5. Copy secret key → `STRIPE\_SECRET\_KEY`
+3. Copy the Price ID → `STRIPE\\\_PRO\\\_PRICE\\\_ID`
+4. Copy publishable key → `NEXT\\\_PUBLIC\\\_STRIPE\\\_PUBLISHABLE\\\_KEY`
+5. Copy secret key → `STRIPE\\\_SECRET\\\_KEY`
 6. After deploying to Vercel, set up a webhook:
 
    * Endpoint: `https://yourdomain.vercel.app/api/billing/webhook`
@@ -49,9 +49,9 @@ Freemium SaaS — free tier with monthly limits, Pro plan at $29/month.
      * `customer.subscription.created`
      * `customer.subscription.updated`
      * `customer.subscription.deleted`
-     * `invoice.payment\_succeeded`
-     * `invoice.payment\_failed`
-   * Copy webhook signing secret → `STRIPE\_WEBHOOK\_SECRET`
+     * `invoice.payment\\\_succeeded`
+     * `invoice.payment\\\_failed`
+   * Copy webhook signing secret → `STRIPE\\\_WEBHOOK\\\_SECRET`
 
 ### 4\. Deploy to Vercel
 
@@ -63,15 +63,15 @@ npm i -g vercel
 vercel
 
 # Follow prompts, then add environment variables:
-vercel env add NEXT\_PUBLIC\_SUPABASE\_URL
-vercel env add NEXT\_PUBLIC\_SUPABASE\_ANON\_KEY
-vercel env add SUPABASE\_SERVICE\_ROLE\_KEY
-vercel env add ANTHROPIC\_API\_KEY
-vercel env add STRIPE\_SECRET\_KEY
-vercel env add NEXT\_PUBLIC\_STRIPE\_PUBLISHABLE\_KEY
-vercel env add STRIPE\_WEBHOOK\_SECRET
-vercel env add STRIPE\_PRO\_PRICE\_ID
-vercel env add NEXT\_PUBLIC\_APP\_URL  # your https://yourapp.vercel.app URL
+vercel env add NEXT\\\_PUBLIC\\\_SUPABASE\\\_URL
+vercel env add NEXT\\\_PUBLIC\\\_SUPABASE\\\_ANON\\\_KEY
+vercel env add SUPABASE\\\_SERVICE\\\_ROLE\\\_KEY
+vercel env add ANTHROPIC\\\_API\\\_KEY
+vercel env add STRIPE\\\_SECRET\\\_KEY
+vercel env add NEXT\\\_PUBLIC\\\_STRIPE\\\_PUBLISHABLE\\\_KEY
+vercel env add STRIPE\\\_WEBHOOK\\\_SECRET
+vercel env add STRIPE\\\_PRO\\\_PRICE\\\_ID
+vercel env add NEXT\\\_PUBLIC\\\_APP\\\_URL  # your https://yourapp.vercel.app URL
 
 # Deploy to production
 vercel --prod
@@ -86,7 +86,7 @@ Or connect your GitHub repo to Vercel and it auto-deploys on every push.
 3. Try generating a listing → confirm usage counter increments in Supabase
 4. Hit the limit → upgrade modal should appear
 5. Complete Stripe checkout (use test card `4242 4242 4242 4242`)
-6. Confirm `is\_pro = true` in your Supabase profiles table
+6. Confirm `is\\\_pro = true` in your Supabase profiles table
 7. Confirm all tools now show unlimited
 
 \---
@@ -115,14 +115,14 @@ stripe listen --forward-to localhost:3000/api/billing/webhook
 
 ## Monthly usage reset
 
-Usage counters reset automatically for users whose `usage\_reset\_at` is older than 30 days.
-The `reset\_monthly\_usage()` function is already in your Supabase DB.
+Usage counters reset automatically for users whose `usage\\\_reset\\\_at` is older than 30 days.
+The `reset\\\_monthly\\\_usage()` function is already in your Supabase DB.
 
 To call it automatically, set up a Supabase cron job (pg\_cron):
 
 ```sql
 -- Run in Supabase SQL Editor
-select cron.schedule('reset-usage', '0 0 1 \* \*', 'select reset\_monthly\_usage()');
+select cron.schedule('reset-usage', '0 0 1 \\\* \\\*', 'select reset\\\_monthly\\\_usage()');
 ```
 
 Or call it from an external cron service like cron-job.org hitting a protected API route.
@@ -135,7 +135,7 @@ When the React Native app is built, it uses the same Supabase project.
 
 * Auth: `@supabase/supabase-js` with AsyncStorage on mobile
 * Usage: reads same `profiles` table → limits are synced automatically
-* Billing: RevenueCat SDK → on successful purchase, call your API to set `is\_pro = true`
+* Billing: RevenueCat SDK → on successful purchase, call your API to set `is\\\_pro = true`
 
 \---
 
@@ -170,7 +170,7 @@ realtyai/
 │       │   └── openhouse.js  # Follow-up generation + usage gate
 │       └── billing/
 │           ├── checkout.js   # Stripe checkout session
-│           └── webhook.js    # Stripe webhook → flip is\_pro
+│           └── webhook.js    # Stripe webhook → flip is\\\_pro
 ├── components/
 │   ├── ListingTool.js    # Listing generator UI
 │   ├── CMATool.js        # CMA report UI
@@ -186,5 +186,6 @@ realtyai/
 ├── next.config.js
 ├── tailwind.config.js
 └── package.json
-```...
+```.......
+
 
