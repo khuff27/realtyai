@@ -1,38 +1,47 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { getServiceClient } from '../../../lib/supabase'
+import { createClient } from '@supabase/supabase-js'
 import { canUse } from '../../../lib/usage'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-async function getUserFromToken(req) {
-  const auth = req.headers.authorization
-  if (!auth || !auth.startsWith('Bearer ')) return null
-  const token = auth.replace('Bearer ', '')
-  const admin = getServiceClient()
-  const { data: { user }, error } = await admin.auth.getUser(token)
-  if (error || !user) return null
-  return user
-}
-
-async function getOrCreateProfile(admin, user) {
-  const { data: profile } = await admin.from('profiles').select('*').eq('id', user.id).single()
-  if (profile) return profile
-  const { data: newProfile } = await admin.from('profiles').insert({
-    id: user.id,
-    email: user.email,
-    full_name: user.user_metadata?.full_name || user.email,
-  }).select().single()
-  return newProfile
-}
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const user = await getUserFromToken(req)
-  if (!user) return res.status(401).json({ error: 'Not authenticated' })
+  const auth = req.headers.authorization
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Not authenticated' })
+  }
+  const token = auth.replace('Bearer ', '').trim()
 
-  const admin = getServiceClient()
-  const profile = await getOrCreateProfile(admin, user)
+  // Use anon key client with the user's token to verify identity
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    { global: { headers: { Authorization: `Bearer ${token}` } } }
+  )
+
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError || !user) {
+    console.error('Auth error:', userError?.message)
+    return res.status(401).json({ error: 'Not authenticated' })
+  }
+
+  // Use service role for DB operations
+  const admin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  )
+
+  let { data: profile } = await admin.from('profiles').select('*').eq('id', user.id).single()
+
+  if (!profile) {
+    const { data: newProfile } = await admin.from('profiles').insert({
+      id: user.id,
+      email: user.email,
+      full_name: user.user_metadata?.full_name || '',
+    }).select().single()
+    profile = newProfile
+  }
 
   if (!canUse(profile, 'listing')) {
     return res.status(403).json({ error: 'Monthly listing limit reached. Upgrade to Pro for unlimited access.' })
@@ -47,7 +56,7 @@ export default async function handler(req, res) {
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1200,
-      system: 'You are RealtyAI, a professional real estate copywriter. Write compelling, accurate real estate content. Use plain text only. Be warm, professional, and specific.',
+      system: 'You are RealtyAI, a professional real estate copywriter. Use plain text only, no markdown.',
       messages: [{
         role: 'user',
         content: `Write 3 outputs for this listing. Separate each with exactly "---OUTPUT---" on its own line.
