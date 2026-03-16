@@ -4,30 +4,32 @@ import { canUse, FREE_LIMITS } from '../../../lib/usage'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
+function decodeJWT(token) {
+  try {
+    const payload = token.split('.')[1]
+    const decoded = Buffer.from(payload, 'base64').toString('utf8')
+    return JSON.parse(decoded)
+  } catch(e) { return null }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
   const auth = req.headers.authorization
-  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Not authenticated' })
+  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not authenticated' })
+  
   const token = auth.replace('Bearer ', '').trim()
+  const payload = decodeJWT(token)
+  if (!payload?.sub) return res.status(401).json({ error: 'Not authenticated' })
+  if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return res.status(401).json({ error: 'Session expired.' })
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    { global: { headers: { Authorization: `Bearer ${token}` } } }
-  )
-
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  if (userError || !user) return res.status(401).json({ error: 'Not authenticated' })
-
+  const userId = payload.sub
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 
-  let { data: profile } = await admin.from('profiles').select('*').eq('id', user.id).single()
+  let { data: profile } = await admin.from('profiles').select('*').eq('id', userId).single()
   if (!profile) {
-    const { data: newProfile } = await admin.from('profiles').insert({
-      id: user.id, email: user.email, full_name: user.user_metadata?.full_name || '',
-    }).select().single()
-    profile = newProfile
+    const { data: np } = await admin.from('profiles').insert({ id: userId, email: payload.email, full_name: payload.user_metadata?.full_name || '' }).select().single()
+    profile = np
   }
 
   if (!canUse(profile, 'openhouse')) return res.status(403).json({ error: 'Monthly follow-up limit reached. Upgrade to Pro.' })
@@ -51,23 +53,17 @@ export default async function handler(req, res) {
       messages: [{
         role: 'user',
         content: `Write ${isText ? 'text messages' : 'emails'} for each guest. Separate with "---GUEST---".
-
-PROPERTY: ${property}
-HIGHLIGHTS: ${highlights || 'Not specified'}
-GUESTS:
-${leadList}
-
-${isText ? 'Keep under 160 chars each.' : 'Include Subject: line then 3-4 sentence email.'} Use their name. End with "[Agent Name]".`,
+PROPERTY: ${property} | HIGHLIGHTS: ${highlights||'N/A'}
+GUESTS: ${leadList}
+${isText ? 'Under 160 chars each.' : 'Subject: line then 3-4 sentence email.'} Use their name. End with "[Agent Name]".`,
       }],
     })
 
     const parts = message.content[0].text.split('---GUEST---').map(p => p.trim()).filter(Boolean)
     const followups = leads.map((lead, i) => ({ name: lead.name, message: parts[i] || `Hi ${lead.name}, thanks for visiting ${property}! — [Agent Name]` }))
-
-    await admin.from('profiles').update({ usage_openhouse: (profile.usage_openhouse || 0) + leads.length }).eq('id', user.id)
+    await admin.from('profiles').update({ usage_openhouse: (profile.usage_openhouse || 0) + leads.length }).eq('id', userId)
     return res.status(200).json({ followups })
   } catch (err) {
-    console.error('Openhouse error:', err)
     return res.status(500).json({ error: 'Generation failed. Please try again.' })
   }
 }
